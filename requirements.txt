@@ -13,4 +13,5 @@ scikit-learn
 catboost
 lightgbm
 xgboost
+huggingface_hub
 # itertools
