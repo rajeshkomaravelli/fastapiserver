@@ -9,7 +9,7 @@ from catboost import CatBoostClassifier
 from typing import Dict
 import pandas as pd
 import requests
-
+from huggingface_hub import hf_hub_download
 app = FastAPI()
 
 # --- Existing Code Begin ---
@@ -206,101 +206,67 @@ def predict(request: PredictionRequest):
 # --- New Function Implementation Begin ---
 @app.post("/predict_regions")
 def predict_regions(request: PredictionRequest):
-    """
-    New endpoint to process a long DNA sequence (≥150 bases) to identify potential promoter regions.
-    
-    The process is as follows:
-    1. Validate that the input sequence has at least 150 bases.
-    2. Load the best precision and best recall values from the CSV file:
-       models/{organism}/best_property/{organism}_best_property_metrics.csv.
-    3. Initialize a score list of the same length as the input sequence with all zeros.
-    4. Slide a window of 150 bases along the sequence (stride=1). For each window:
-         - Use the existing /predict endpoint (by sending an HTTP POST request)
-           to obtain the ensemble prediction for that window.
-         - If the prediction is "Promoter" (ensemble_prediction == 1), then add the best precision value
-           to every index in the window.
-         - Otherwise, subtract the best recall value from every index in the window.
-    5. After processing all windows, scan the resulting score list to find contiguous segments
-       where every score is positive and the segment length is greater than 50.
-    6. Return these segments along with their start and end positions and the corresponding DNA subsequence.
-    """
-    # Ensure the input sequence is long enough.
     try:
         sequence = request.sequence.strip().upper()
         if len(sequence) < 150:
             raise HTTPException(status_code=400, detail="Input sequence must be at least 150 bases long.")
-        
+
         organism = request.organism
 
-        # Load best precision and best recall from the metrics CSV file.
+        # Load precision/recall metrics
         metrics_file = os.path.join("models", organism, "best_property", f"{organism}_best_property_metrics.csv")
         print("hello")
         if not os.path.exists(metrics_file):
             raise HTTPException(status_code=404, detail=f"Metrics file not found: {metrics_file}")
         
-        try:
-            df_metrics = pd.read_csv(metrics_file)
-            best_precision = df_metrics["precision"].max()
-            best_recall = df_metrics["recall"].max()
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error reading metrics file: {str(e)}")
+        df_metrics = pd.read_csv(metrics_file)
+        best_precision = df_metrics["precision"].max()
+        best_recall = df_metrics["recall"].max()
+
         seq_length = len(sequence)
-        # Initialize a score list with zeros for each nucleotide position in the sequence.
         score_profile = [0.0] * seq_length
 
-        # URL for the existing /predict endpoint.
-        predict_url = "http://127.0.0.1:8000/predict"
-        # Slide a 150-base window over the sequence.
+        # Slide 150-base window and directly call `predict` function
         num_windows = seq_length - 150 + 1
         for i in range(num_windows):
             window_seq = sequence[i:i+150]
-            payload = {"sequence": window_seq, "organism": organism}
+            predict_request = PredictionRequest(sequence=window_seq, organism=organism)
             try:
-                response = requests.post(predict_url, json=payload)
-                response.raise_for_status()
-                result = response.json()
+                result = predict(predict_request)  # 🔥 Direct internal function call
                 is_promoter = result.get("ensemble_prediction", 0) == 1
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error obtaining prediction for window starting at index {i}: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Error obtaining prediction for window at index {i}: {str(e)}")
 
-            # Update the score_profile over the indices for this window.
-            for j in range(i, i+150):
-                if is_promoter:
-                    score_profile[j] += best_precision
-                else:
-                    score_profile[j] -= best_recall
+            for j in range(i, i + 150):
+                score_profile[j] += best_precision if is_promoter else -best_recall
 
-        # Identify continuous segments where all score values are positive and the segment length is greater than 50.
+        # Extract positive-score promoter regions of length > 10
         promoter_regions = []
         in_region = False
         region_start = 0
         for idx, score in enumerate(score_profile):
             if score > 0:
                 if not in_region:
-                    # Start of a new potential region.
                     in_region = True
                     region_start = idx
             else:
                 if in_region:
-                    # End of region; check if length is > 50.
                     region_end = idx - 1
-                    if (region_end - region_start + 1) >= 10:
-                        region_seq = sequence[region_start:region_end+1]
+                    if region_end - region_start + 1 >= 10:
                         promoter_regions.append({
                             "start": region_start,
                             "end": region_end,
-                            "region_sequence": region_seq
+                            "region_sequence": sequence[region_start:region_end+1]
                         })
                     in_region = False
-        # Handle region continuing until the end of the sequence.
+
         if in_region:
             region_end = seq_length - 1
-            if (region_end - region_start + 1) >= 10:
-                region_seq = sequence[region_start:region_end+1]
+            if region_end - region_start + 1 >= 10:
                 promoter_regions.append({
                     "start": region_start,
                     "end": region_end,
-                    "region_sequence": region_seq
+                    "region_sequence": sequence[region_start:region_end+1]
                 })
 
         return {
@@ -311,11 +277,11 @@ def predict_regions(request: PredictionRequest):
             "score_profile": score_profile,
             "promoter_regions": promoter_regions
         }
+
     except Exception as e:
-        print("The error in the code is:",e)
-# --- New Function Implementation End ---
-
-
+        print("The error in the code is:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))  # Render sets PORT env var
     uvicorn.run(app, host="0.0.0.0", port=port)

@@ -34,7 +34,7 @@ def show_results():
     st.write(f"### Selected Organism: {organism}")
     st.write(f"### Submitted Sequence: \n`{sequence}`")
     
-    FASTAPI_URL = "http://127.0.0.1:8000/predict"
+    FASTAPI_URL = "https://fastapiserver-2.onrender.com/predict"
     with st.spinner("Processing your sequence..."):
         try:
             response = requests.post(
@@ -156,7 +156,7 @@ def show_general_results():
 
     # Display overall output details
     st.write("## General Prediction Output")
-    st.write(f"**Organism:** {results.get('organism', 'Unknown')}")
+    # st.write(f"**Organism:** {results.get('organism', 'Unknown')}")
     st.write(f"**Input Sequence Length:** {results.get('input_sequence_length', 'Unknown')}")
     st.write(f"**Best Precision:** {results.get('best_precision', 'Unknown')}")
     st.write(f"**Best Recall:** {results.get('best_recall', 'Unknown')}")
