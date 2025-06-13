@@ -1,0 +1,16 @@
+streamlit
+fastapi[all]
+pydantic
+numpy
+pandas
+uvicorn
+pillow
+biopython
+requests
+fpdf
+matplotlib
+scikit-learn
+catboost
+lightgbm
+xgboost
+# itertools
