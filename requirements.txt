@@ -9,7 +9,7 @@ biopython
 requests
 fpdf
 matplotlib
-scikit-learn
+scikit-learn==1.6.1
 catboost
 lightgbm
 xgboost
